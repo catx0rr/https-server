@@ -23,7 +23,28 @@ cat priv.key cert.crt > fullchain.pem
 Configure the path on https.server.py
 
 ```
-certfile = '/opt/https-server/self-signed/fullchain.pem'
+certfile = '/etc/ssl/certs/fullchain.pem'
+```
+
+###### Help / Usage
+```
+usage: https.server.py [-h] [-p PORT] [-a ADDRESS] [-c CERTFILE] [-u UPLOADS] [-d DOWNLOADS] [-s SERVE]
+
+Run an HTTPS server with file upload/download capabilities.
+
+options:
+  -h, --help            show this help message and exit
+  -p PORT, --port PORT  Port to run the server on.
+  -a ADDRESS, --address ADDRESS
+                        Address to bind the server.
+  -c CERTFILE, --certfile CERTFILE
+                        Path to the SSL certificate file.
+  -u UPLOADS, --uploads UPLOADS
+                        Directory to save uploaded files.
+  -d DOWNLOADS, --downloads DOWNLOADS
+                        Directory to serve downloads.
+  -s SERVE, --serve SERVE
+                        Document root directory.
 ```
 
 ---
