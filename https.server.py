@@ -6,6 +6,7 @@ import ssl
 import socketserver
 import argparse
 from urllib.parse import urlparse, parse_qs
+from setproctitle import setproctitle
 import base64
 
 # Argument parsing with argparse
@@ -199,4 +200,5 @@ with socketserver.TCPServer(server_address, handler) as httpd:
     print(f'Document root: {args.serve}')
     if args.basic_auth:
         print(f'Basic Auth enabled for /uploads and /downloads with user: {auth_username}')
+    setproctitle("https-server")
     httpd.serve_forever()
