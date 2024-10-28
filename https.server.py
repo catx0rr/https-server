@@ -6,6 +6,7 @@ import ssl
 import socketserver
 import argparse
 from urllib.parse import urlparse, parse_qs
+import base64
 
 # Argument parsing with argparse
 parser = argparse.ArgumentParser(description="Run an HTTPS server with file upload/download capabilities.")
@@ -15,20 +16,43 @@ parser.add_argument("-c", "--certfile", type=str, default="/etc/ssl/certs/fullch
 parser.add_argument("-u", "--uploads", type=str, default="/tmp", help="Directory to save uploaded files.")
 parser.add_argument("-d", "--downloads", type=str, default="/tmp", help="Directory to serve downloads.")
 parser.add_argument("-s", "--serve", type=str, default="/var/www/html", help="Document root directory.")
+parser.add_argument("-b", "--basic-auth", nargs=2, metavar=("USERNAME", "PASSWORD"), help="Enable basic auth with a username and password for /uploads and /downloads.")
+
 args = parser.parse_args()
 
 # Ensure directories exist
 os.makedirs(args.uploads, exist_ok=True)
 os.makedirs(args.downloads, exist_ok=True)
 
+# Encode username and password for basic authentication
+if args.basic_auth:
+    auth_username, auth_password = args.basic_auth
+    basic_auth_encoded = base64.b64encode(f"{auth_username}:{auth_password}".encode()).decode()
+
 # Custom handler to manage different endpoints
 class CustomHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
     def do_GET(self):
+        # Check for Basic Auth on /uploads and /downloads
+        if (self.path.startswith('/uploads') or self.path.startswith('/downloads')) and args.basic_auth:
+            if not self.check_basic_auth():
+                self.send_auth_prompt()
+                return
+
         # Serve document root at root URL
         if self.path == '/':
             self.path = '/index.html'
             self.directory = args.serve
             return super().do_GET()
+
+        # Serve the /downloads directory listing
+        elif self.path.startswith('/downloads'):
+            self.directory = args.downloads
+            requested_path = os.path.join(args.downloads, os.path.relpath(self.path, '/downloads'))
+            if os.path.isdir(requested_path):
+                self.list_directory(requested_path)
+            else:
+                self.path = '/' + os.path.relpath(requested_path, args.downloads)
+                return super().do_GET()
 
         # Serve the file upload form at /uploads
         elif self.path == '/uploads':
@@ -50,19 +74,17 @@ class CustomHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                 </html>
             """)
 
-        # Serve the /downloads directory listing
-        elif self.path == '/downloads':
-            self.directory = args.downloads
-            self.path = '/'  # Ensure it loads the directory root within downloads
-            return super().do_GET()
-
         # Handle other GET requests normally
         else:
             super().do_GET()
 
     def do_POST(self):
-        # Handle file uploads at /uploads
+        # Handle file uploads at /uploads, with optional Basic Auth
         if self.path == '/uploads':
+            if args.basic_auth and not self.check_basic_auth():
+                self.send_auth_prompt()
+                return
+
             content_type = self.headers.get('Content-Type')
             if not content_type or 'multipart/form-data' not in content_type:
                 self.send_response(400)
@@ -103,6 +125,63 @@ class CustomHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(b"400 Bad Request: No file was uploaded.")
 
+    def check_basic_auth(self):
+        """Check if the request has valid Basic Auth credentials."""
+        auth_header = self.headers.get('Authorization')
+        if auth_header is None:
+            return False
+        auth_type, auth_data = auth_header.split(" ", 1)
+        if auth_type != "Basic":
+            return False
+        return auth_data == basic_auth_encoded
+
+    def send_auth_prompt(self):
+        """Send a 401 response prompting for Basic Auth."""
+        self.send_response(401)
+        self.send_header("WWW-Authenticate", 'Basic realm="Restricted Access"')
+        self.send_header("Content-type", "text/html")
+        self.end_headers()
+        self.wfile.write(b"401 Unauthorized: Please provide valid credentials.")
+
+    def list_directory(self, path):
+        """Override this method to add directory listing support."""
+        try:
+            list_dir = os.listdir(path)
+        except os.error:
+            self.send_error(404, "No permission to list directory")
+            return None
+        list_dir.sort(key=lambda a: a.lower())
+        r = []
+        displaypath = os.path.relpath(path, args.downloads)
+
+        # Start HTML for directory listing
+        r.append('<!DOCTYPE html>')
+        r.append('<html><head><title>Directory listing for %s</title></head>' % displaypath)
+        r.append('<body><h2>Directory listing for %s</h2>' % displaypath)
+        r.append('<hr><ul>')
+
+        # List each file and directory with a link
+        for name in list_dir:
+            fullname = os.path.join(path, name)
+            displayname = name
+            linkname = '/downloads/' + os.path.relpath(fullname, args.downloads)
+
+            if os.path.isdir(fullname):
+                displayname = name + "/"
+                linkname = linkname + "/"
+            r.append('<li><a href="%s">%s</a></li>' % (linkname, displayname))
+
+        # End HTML
+        r.append('</ul><hr></body></html>')
+
+        encoded = '\n'.join(r).encode('utf-8', 'surrogateescape')
+        self.send_response(200)
+        self.send_header("Content-type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(encoded)))
+        self.end_headers()
+        self.wfile.write(encoded)
+        return
+
 # HTTPS setup
 certfile = os.path.abspath(args.certfile)
 context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
@@ -118,4 +197,6 @@ with socketserver.TCPServer(server_address, handler) as httpd:
     print(f'Upload directory: {args.uploads}')
     print(f'Downloads directory: {args.downloads}')
     print(f'Document root: {args.serve}')
+    if args.basic_auth:
+        print(f'Basic Auth enabled for /uploads and /downloads with user: {auth_username}')
     httpd.serve_forever()
