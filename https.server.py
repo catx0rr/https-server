@@ -33,6 +33,10 @@ if args.basic_auth:
 # Custom handler to manage different endpoints
 class CustomHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
     def do_GET(self):
+        # Log the user agent
+        user_agent = self.headers.get('User-Agent', 'Unknown')
+        print(f"[INFO] GET request received from User-Agent: {user_agent}")
+        
         # Check for Basic Auth on /uploads and /downloads
         if (self.path.startswith('/uploads') or self.path.startswith('/downloads')) and args.basic_auth:
             if not self.check_basic_auth():
@@ -80,6 +84,10 @@ class CustomHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
             super().do_GET()
 
     def do_POST(self):
+        # Log the user agent
+        user_agent = self.headers.get('User-Agent', 'Unknown')
+        print(f"[INFO] POST request received from User-Agent: {user_agent}")
+        
         # Handle file uploads at /uploads, with optional Basic Auth
         if self.path == '/uploads':
             if args.basic_auth and not self.check_basic_auth():
